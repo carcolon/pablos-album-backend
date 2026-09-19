@@ -8,6 +8,7 @@ using BabyAlbum.Infrastructure.Identity;
 using BabyAlbum.Infrastructure.Persistence;
 using BabyAlbum.Infrastructure.Storage.GoogleDrive;
 using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
@@ -88,6 +89,12 @@ builder.Services.PostConfigure<GoogleDriveOptions>(options =>
 builder.Services.AddScoped<AlbumReader>();
 builder.Services.AddScoped<MediaUploadService>();
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownIPNetworks.Clear();
+    options.KnownProxies.Clear();
+});
 
 var app = builder.Build();
 
@@ -112,6 +119,7 @@ app.Use(async (context, next) =>
     await next();
 });
 
+app.UseForwardedHeaders();
 app.UseHttpsRedirection();
 app.UseCors();
 app.UseAuthentication();
