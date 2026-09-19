@@ -38,7 +38,7 @@ Useful endpoints:
 
 Authentication is native ASP.NET Core Identity with secure cookies, password hashing managed by Identity, PostgreSQL through EF Core, CSRF validation for unsafe API methods and security headers including CSP. The album viewer is public; authentication is required for Studio actions such as uploads and future editing.
 
-Use Neon for the free PostgreSQL database. Local setup can read Neon CLI's `.env.local`:
+Use Neon for the free PostgreSQL database. In local development, the API automatically reads `.env.local` from the backend folder or a parent folder. You can also apply migrations manually with:
 
 ```powershell
 $env:DATABASE_URL = (Get-Content .env.local | Where-Object { $_ -like 'DATABASE_URL=*' } | Select-Object -First 1).Substring('DATABASE_URL='.Length).Trim().Trim('"').Trim("'")

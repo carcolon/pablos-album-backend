@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Identity;
 
 var builder = WebApplication.CreateBuilder(args);
+LoadDotEnvLocal(builder.Environment.ContentRootPath);
 
 var renderPort = Environment.GetEnvironmentVariable("PORT");
 if (!string.IsNullOrWhiteSpace(renderPort))
@@ -343,6 +344,54 @@ static async Task<object?> BuildUserResponseAsync(UserManager<ApplicationUser> u
 
     var roles = await userManager.GetRolesAsync(user);
     return new { email = user.Email, user.DisplayName, roles };
+}
+
+static void LoadDotEnvLocal(string contentRootPath)
+{
+    foreach (var directory in EnumerateCurrentAndParents(contentRootPath).Concat(EnumerateCurrentAndParents(Directory.GetCurrentDirectory())))
+    {
+        var path = Path.Combine(directory, ".env.local");
+        if (!File.Exists(path))
+        {
+            continue;
+        }
+
+        foreach (var line in File.ReadLines(path))
+        {
+            var trimmed = line.Trim();
+            if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith('#'))
+            {
+                continue;
+            }
+
+            var separatorIndex = trimmed.IndexOf('=');
+            if (separatorIndex <= 0)
+            {
+                continue;
+            }
+
+            var key = trimmed[..separatorIndex].Trim();
+            if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(key)))
+            {
+                continue;
+            }
+
+            var value = trimmed[(separatorIndex + 1)..].Trim().Trim('"').Trim('\'');
+            Environment.SetEnvironmentVariable(key, value);
+        }
+
+        return;
+    }
+}
+
+static IEnumerable<string> EnumerateCurrentAndParents(string startPath)
+{
+    var directory = new DirectoryInfo(startPath);
+    while (directory is not null)
+    {
+        yield return directory.FullName;
+        directory = directory.Parent;
+    }
 }
 
 internal sealed record RegisterOwnerRequest(string Email, string Password, string DisplayName);
