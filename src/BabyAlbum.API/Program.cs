@@ -5,9 +5,11 @@ using BabyAlbum.Contracts;
 using BabyAlbum.Domain.Albums;
 using BabyAlbum.Infrastructure;
 using BabyAlbum.Infrastructure.Identity;
+using BabyAlbum.Infrastructure.Persistence;
 using BabyAlbum.Infrastructure.Storage.GoogleDrive;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 LoadDotEnvLocal(builder.Environment.ContentRootPath);
@@ -88,6 +90,12 @@ builder.Services.AddScoped<MediaUploadService>();
 builder.Services.AddInfrastructure(builder.Configuration);
 
 var app = builder.Build();
+
+await using (var scope = app.Services.CreateAsyncScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    await dbContext.Database.MigrateAsync();
+}
 
 if (app.Environment.IsDevelopment())
 {
