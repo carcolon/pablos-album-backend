@@ -11,7 +11,7 @@ public static class ConnectionStringFactory
     {
         var configured = configuration?.GetConnectionString("DefaultConnection");
         var databaseUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
-        var selected = string.IsNullOrWhiteSpace(configured) ? databaseUrl : configured;
+        var selected = NormalizeConnectionStringInput(string.IsNullOrWhiteSpace(configured) ? databaseUrl : configured);
 
         if (string.IsNullOrWhiteSpace(selected))
         {
@@ -40,5 +40,34 @@ public static class ConnectionStringFactory
         };
 
         return builder.ConnectionString;
+    }
+
+    private static string? NormalizeConnectionStringInput(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return value;
+        }
+
+        var normalized = value.Trim().Trim('"', '\'');
+        const string databaseUrlPrefix = "DATABASE_URL=";
+        if (normalized.StartsWith(databaseUrlPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized[databaseUrlPrefix.Length..].Trim().Trim('"', '\'');
+        }
+
+        if (normalized.StartsWith("psql ", StringComparison.OrdinalIgnoreCase))
+        {
+            var firstQuote = normalized.IndexOf('\'');
+            var lastQuote = normalized.LastIndexOf('\'');
+            if (firstQuote >= 0 && lastQuote > firstQuote)
+            {
+                return normalized[(firstQuote + 1)..lastQuote].Trim();
+            }
+
+            return normalized["psql ".Length..].Trim().Trim('"', '\'');
+        }
+
+        return normalized;
     }
 }
