@@ -355,6 +355,13 @@ api.MapPost("/albums/{albumId:guid}/pages", async (
     {
         return Results.BadRequest(new { error = exception.Message });
     }
+    catch (Exception exception)
+    {
+        return Results.Problem(
+            detail: app.Environment.IsDevelopment() ? exception.ToString() : exception.Message,
+            statusCode: StatusCodes.Status500InternalServerError,
+            title: "Photo upload failed.");
+    }
 }).RequireAuthorization("CanEditAlbum");
 
 api.MapDelete("/albums/{albumId:guid}/pages/{pageId:guid}", async (
