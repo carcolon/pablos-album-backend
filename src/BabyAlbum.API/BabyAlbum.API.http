@@ -1,0 +1,6 @@
+@BabyAlbum.API_HostAddress = http://localhost:5188
+
+GET {{BabyAlbum.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

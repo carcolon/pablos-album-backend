@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/BabyAlbum.API/BabyAlbum.API.csproj" />
+    <Project Path="src/BabyAlbum.Application/BabyAlbum.Application.csproj" />
+    <Project Path="src/BabyAlbum.Contracts/BabyAlbum.Contracts.csproj" />
+    <Project Path="src/BabyAlbum.Domain/BabyAlbum.Domain.csproj" />
+    <Project Path="src/BabyAlbum.Infrastructure/BabyAlbum.Infrastructure.csproj" />
+  </Folder>
+</Solution>
