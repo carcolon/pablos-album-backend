@@ -28,12 +28,23 @@ builder.Services.AddCors(options =>
     {
         var configuredOrigins = builder.Configuration["Cors:AllowedOrigins"]
             ?? Environment.GetEnvironmentVariable("CORS_ALLOWED_ORIGINS");
-        var origins = string.IsNullOrWhiteSpace(configuredOrigins)
-            ? ["http://localhost:5173", "https://localhost:5173", "http://127.0.0.1:5173"]
-            : configuredOrigins.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        var origins = new[]
+            {
+                "http://localhost:5173",
+                "https://localhost:5173",
+                "http://127.0.0.1:5173",
+                "https://pablos-album-frontend.onrender.com"
+            }
+            .Concat(string.IsNullOrWhiteSpace(configuredOrigins)
+                ? []
+                : configuredOrigins.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            .Select(NormalizeOrigin)
+            .Where(origin => !string.IsNullOrWhiteSpace(origin))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         policy
-            .WithOrigins(origins)
+            .SetIsOriginAllowed(origin => origins.Contains(NormalizeOrigin(origin)))
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
@@ -556,6 +567,11 @@ static IEnumerable<string> EnumerateCurrentAndParents(string startPath)
         yield return directory.FullName;
         directory = directory.Parent;
     }
+}
+
+static string NormalizeOrigin(string origin)
+{
+    return origin.Trim().TrimEnd('/');
 }
 
 internal sealed record RegisterOwnerRequest(string Email, string Password, string DisplayName);
