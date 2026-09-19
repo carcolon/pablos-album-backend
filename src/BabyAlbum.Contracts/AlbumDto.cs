@@ -28,6 +28,17 @@ public sealed record PhotoDto(
     string StorageKey,
     int SortOrder);
 
+public sealed record PhotoLibraryItemDto(
+    Guid Id,
+    Guid PageId,
+    int PageNumber,
+    string Url,
+    string Alt,
+    string Caption,
+    string StorageProvider,
+    string StorageKey,
+    int SortOrder);
+
 public sealed record MemoryDto(
     Guid Id,
     string Title,

@@ -12,7 +12,13 @@ public interface IAlbumRepository
 
     Task<string?> GetPhotoContentTypeAsync(Guid photoId, CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<AlbumPhoto>> ListPhotosAsync(Guid albumId, CancellationToken cancellationToken);
+
     Task UpdatePageLayoutAsync(Guid albumId, Guid pageId, LayoutType layout, CancellationToken cancellationToken);
 
     Task AddPhotoAsync(Guid albumId, Guid pageId, Photo photo, string contentType, CancellationToken cancellationToken);
+
+    Task AssignPhotoToPageAsync(Guid albumId, Guid pageId, Guid photoId, int sortOrder, CancellationToken cancellationToken);
+
+    Task UpdatePhotoAsync(Guid photoId, string alt, string caption, CancellationToken cancellationToken);
 }

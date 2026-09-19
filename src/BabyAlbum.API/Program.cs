@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using BabyAlbum.Application.Albums;
 using BabyAlbum.Application.Media;
+using BabyAlbum.Contracts;
 using BabyAlbum.Domain.Albums;
 using BabyAlbum.Infrastructure;
 using BabyAlbum.Infrastructure.Identity;
@@ -292,6 +293,43 @@ api.MapPut("/albums/{albumId:guid}/pages/{pageId:guid}/layout", async (
     }
 }).RequireAuthorization("CanEditAlbum");
 
+api.MapGet("/albums/{albumId:guid}/photos", async (
+    Guid albumId,
+    IAlbumRepository albums,
+    CancellationToken cancellationToken) =>
+{
+    var photos = await albums.ListPhotosAsync(albumId, cancellationToken);
+    return Results.Ok(photos.Select(photo => new PhotoLibraryItemDto(
+        photo.Id,
+        photo.PageId,
+        photo.PageNumber,
+        photo.Url,
+        photo.Alt,
+        photo.Caption,
+        photo.StorageProvider,
+        photo.StorageKey,
+        photo.SortOrder)));
+}).RequireAuthorization("CanEditAlbum");
+
+api.MapPut("/albums/{albumId:guid}/pages/{pageId:guid}/photos/{photoId:guid}", async (
+    Guid albumId,
+    Guid pageId,
+    Guid photoId,
+    AssignPhotoRequest request,
+    IAlbumRepository albums,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        await albums.AssignPhotoToPageAsync(albumId, pageId, photoId, request.SortOrder, cancellationToken);
+        return Results.NoContent();
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).RequireAuthorization("CanEditAlbum");
+
 api.MapPost("/albums/{albumId:guid}/pages/{pageId:guid}/photos", async (
     Guid albumId,
     Guid pageId,
@@ -332,7 +370,24 @@ api.MapPost("/albums/{albumId:guid}/pages/{pageId:guid}/photos", async (
     }
     catch (InvalidOperationException exception)
     {
-        return Results.Problem(exception.Message, statusCode: StatusCodes.Status503ServiceUnavailable);
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).RequireAuthorization("CanEditAlbum");
+
+api.MapPut("/photos/{photoId:guid}", async (
+    Guid photoId,
+    UpdatePhotoRequest request,
+    IAlbumRepository albums,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        await albums.UpdatePhotoAsync(photoId, request.Alt ?? string.Empty, request.Caption ?? string.Empty, cancellationToken);
+        return Results.NoContent();
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.NotFound(new { error = exception.Message });
     }
 }).RequireAuthorization("CanEditAlbum");
 
@@ -438,3 +493,7 @@ internal sealed record RegisterOwnerRequest(string Email, string Password, strin
 internal sealed record LoginRequest(string Email, string Password, string? DisplayName);
 
 internal sealed record UpdatePageLayoutRequest(string Layout);
+
+internal sealed record AssignPhotoRequest(int SortOrder);
+
+internal sealed record UpdatePhotoRequest(string? Alt, string? Caption);

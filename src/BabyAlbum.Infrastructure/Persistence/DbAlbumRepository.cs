@@ -7,6 +7,7 @@ namespace BabyAlbum.Infrastructure.Persistence;
 
 public sealed class DbAlbumRepository : IAlbumRepository
 {
+    private const int MaxPhotosPerPage = 3;
     private static readonly Guid AlbumId = Guid.Parse("018f4b44-6f15-7a45-a810-a1168d98c041");
     private readonly AppDbContext _dbContext;
 
@@ -54,6 +55,29 @@ public sealed class DbAlbumRepository : IAlbumRepository
             .FirstOrDefaultAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<AlbumPhoto>> ListPhotosAsync(Guid albumId, CancellationToken cancellationToken)
+    {
+        await EnsureSeededAsync(cancellationToken);
+
+        return await _dbContext.Photos
+            .AsNoTracking()
+            .Include(photo => photo.AlbumPage)
+            .Where(photo => photo.AlbumPage != null && photo.AlbumPage.AlbumId == albumId)
+            .OrderBy(photo => photo.AlbumPage!.PageNumber)
+            .ThenBy(photo => photo.SortOrder)
+            .Select(photo => new AlbumPhoto(
+                photo.Id,
+                photo.AlbumPageId,
+                photo.AlbumPage!.PageNumber,
+                photo.Url,
+                photo.Alt,
+                photo.Caption,
+                photo.StorageProvider,
+                photo.StorageKey,
+                photo.SortOrder))
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task UpdatePageLayoutAsync(Guid albumId, Guid pageId, LayoutType layout, CancellationToken cancellationToken)
     {
         var page = await _dbContext.AlbumPages
@@ -79,6 +103,11 @@ public sealed class DbAlbumRepository : IAlbumRepository
             throw new InvalidOperationException("Album page was not found.");
         }
 
+        if (page.Photos.Count >= MaxPhotosPerPage)
+        {
+            throw new InvalidOperationException("A page can contain up to 3 photos.");
+        }
+
         page.Photos.Add(new PhotoRecord
         {
             Id = photo.Id,
@@ -92,6 +121,70 @@ public sealed class DbAlbumRepository : IAlbumRepository
             SortOrder = page.Photos.Count + 1
         });
 
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task AssignPhotoToPageAsync(Guid albumId, Guid pageId, Guid photoId, int sortOrder, CancellationToken cancellationToken)
+    {
+        var targetPage = await _dbContext.AlbumPages
+            .Include(page => page.Photos)
+            .FirstOrDefaultAsync(page => page.Id == pageId && page.AlbumId == albumId, cancellationToken);
+
+        if (targetPage is null)
+        {
+            throw new InvalidOperationException("Album page was not found.");
+        }
+
+        var photo = await _dbContext.Photos
+            .Include(item => item.AlbumPage)
+            .FirstOrDefaultAsync(item => item.Id == photoId, cancellationToken);
+
+        if (photo?.AlbumPage is null || photo.AlbumPage.AlbumId != albumId)
+        {
+            throw new InvalidOperationException("Photo was not found in this album.");
+        }
+
+        var sourcePageId = photo.AlbumPageId;
+        var isMovingToDifferentPage = sourcePageId != targetPage.Id;
+        if (isMovingToDifferentPage && targetPage.Photos.Count >= MaxPhotosPerPage)
+        {
+            throw new InvalidOperationException("A page can contain up to 3 photos.");
+        }
+
+        var targetPhotos = targetPage.Photos
+            .Where(item => item.Id != photo.Id)
+            .OrderBy(item => item.SortOrder)
+            .ToList();
+
+        photo.AlbumPageId = targetPage.Id;
+        photo.SortOrder = Math.Clamp(sortOrder, 1, MaxPhotosPerPage);
+        targetPhotos.Insert(Math.Min(photo.SortOrder - 1, targetPhotos.Count), photo);
+        NormalizePhotoOrder(targetPhotos);
+
+        if (isMovingToDifferentPage)
+        {
+            var sourcePhotos = await _dbContext.Photos
+                .Where(item => item.AlbumPageId == sourcePageId && item.Id != photo.Id)
+                .OrderBy(item => item.SortOrder)
+                .ToListAsync(cancellationToken);
+            NormalizePhotoOrder(sourcePhotos);
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task UpdatePhotoAsync(Guid photoId, string alt, string caption, CancellationToken cancellationToken)
+    {
+        var photo = await _dbContext.Photos
+            .FirstOrDefaultAsync(item => item.Id == photoId, cancellationToken);
+
+        if (photo is null)
+        {
+            throw new InvalidOperationException("Photo was not found.");
+        }
+
+        photo.Alt = TrimToLength(alt, 240);
+        photo.Caption = TrimToLength(caption, 500);
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
@@ -178,5 +271,19 @@ public sealed class DbAlbumRepository : IAlbumRepository
         });
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static void NormalizePhotoOrder(IReadOnlyList<PhotoRecord> photos)
+    {
+        for (var index = 0; index < photos.Count; index++)
+        {
+            photos[index].SortOrder = index + 1;
+        }
+    }
+
+    private static string TrimToLength(string value, int maxLength)
+    {
+        var trimmed = value.Trim();
+        return trimmed.Length <= maxLength ? trimmed : trimmed[..maxLength];
     }
 }
