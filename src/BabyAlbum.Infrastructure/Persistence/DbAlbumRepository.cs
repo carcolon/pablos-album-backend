@@ -174,31 +174,33 @@ public sealed class DbAlbumRepository : IAlbumRepository
 
     public async Task AddPhotoAsync(Guid albumId, Guid pageId, Photo photo, string contentType, CancellationToken cancellationToken)
     {
-        var page = await _dbContext.AlbumPages
-            .Include(page => page.Photos)
-            .FirstOrDefaultAsync(page => page.Id == pageId && page.AlbumId == albumId, cancellationToken);
+        var pageExists = await _dbContext.AlbumPages
+            .AnyAsync(page => page.Id == pageId && page.AlbumId == albumId, cancellationToken);
 
-        if (page is null)
+        if (!pageExists)
         {
             throw new InvalidOperationException("Album page was not found.");
         }
 
-        if (page.Photos.Count >= MaxPhotosPerPage)
+        var photoCount = await _dbContext.Photos
+            .CountAsync(item => item.AlbumPageId == pageId, cancellationToken);
+
+        if (photoCount >= MaxPhotosPerPage)
         {
             throw new InvalidOperationException("A page can contain up to 3 photos.");
         }
 
-        page.Photos.Add(new PhotoRecord
+        _dbContext.Photos.Add(new PhotoRecord
         {
             Id = photo.Id,
-            AlbumPageId = page.Id,
+            AlbumPageId = pageId,
             Url = photo.Url,
             Alt = photo.Alt,
             Caption = photo.Caption,
             ContentType = contentType,
             StorageProvider = photo.StorageProvider,
             StorageKey = photo.StorageKey,
-            SortOrder = page.Photos.Count + 1
+            SortOrder = photoCount + 1
         });
 
         await _dbContext.SaveChangesAsync(cancellationToken);

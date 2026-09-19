@@ -63,7 +63,15 @@ public sealed class MediaUploadService
             stored.StorageKey,
             0);
 
-        await _albums.AddPhotoAsync(albumId, pageId, photo, stored.MimeType, cancellationToken);
+        try
+        {
+            await _albums.AddPhotoAsync(albumId, pageId, photo, stored.MimeType, cancellationToken);
+        }
+        catch
+        {
+            await _mediaStorage.DeleteAsync(stored.StorageKey, cancellationToken);
+            throw;
+        }
 
         return new UploadPhotoResult(
             albumId,
