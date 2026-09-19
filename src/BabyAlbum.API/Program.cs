@@ -1,7 +1,11 @@
+using System.Security.Claims;
 using BabyAlbum.Application.Albums;
 using BabyAlbum.Application.Media;
 using BabyAlbum.Infrastructure;
+using BabyAlbum.Infrastructure.Identity;
 using BabyAlbum.Infrastructure.Storage.GoogleDrive;
+using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.Identity;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -25,8 +29,42 @@ builder.Services.AddCors(options =>
         policy
             .WithOrigins(origins)
             .AllowAnyHeader()
-            .AllowAnyMethod();
+            .AllowAnyMethod()
+            .AllowCredentials();
     });
+});
+builder.Services.AddAntiforgery(options =>
+{
+    options.HeaderName = "X-CSRF-TOKEN";
+    options.Cookie.Name = "pablos_album_csrf";
+    options.Cookie.HttpOnly = true;
+    options.Cookie.SameSite = builder.Environment.IsDevelopment() ? SameSiteMode.Lax : SameSiteMode.None;
+    options.Cookie.SecurePolicy = builder.Environment.IsDevelopment() ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always;
+});
+builder.Services.ConfigureApplicationCookie(options =>
+{
+    options.Cookie.Name = "pablos_album_session";
+    options.Cookie.HttpOnly = true;
+    options.Cookie.SameSite = builder.Environment.IsDevelopment() ? SameSiteMode.Lax : SameSiteMode.None;
+    options.Cookie.SecurePolicy = builder.Environment.IsDevelopment() ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always;
+    options.LoginPath = "/api/auth/unauthorized";
+    options.AccessDeniedPath = "/api/auth/forbidden";
+    options.SlidingExpiration = true;
+    options.ExpireTimeSpan = TimeSpan.FromDays(14);
+    options.Events.OnRedirectToLogin = context =>
+    {
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        return Task.CompletedTask;
+    };
+    options.Events.OnRedirectToAccessDenied = context =>
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        return Task.CompletedTask;
+    };
+});
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("CanEditAlbum", policy => policy.RequireRole(ApplicationRoles.Owner, ApplicationRoles.Editor));
 });
 builder.Services.Configure<GoogleDriveOptions>(options =>
 {
@@ -40,7 +78,7 @@ builder.Services.PostConfigure<GoogleDriveOptions>(options =>
 });
 builder.Services.AddScoped<AlbumReader>();
 builder.Services.AddScoped<MediaUploadService>();
-builder.Services.AddInfrastructure();
+builder.Services.AddInfrastructure(builder.Configuration);
 
 var app = builder.Build();
 
@@ -49,23 +87,139 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
+app.Use(async (context, next) =>
+{
+    context.Response.Headers.TryAdd("Content-Security-Policy", "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+    context.Response.Headers.TryAdd("X-Content-Type-Options", "nosniff");
+    context.Response.Headers.TryAdd("X-Frame-Options", "DENY");
+    context.Response.Headers.TryAdd("Referrer-Policy", "strict-origin-when-cross-origin");
+    context.Response.Headers.TryAdd("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    await next();
+});
+
 app.UseHttpsRedirection();
 app.UseCors();
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.Use(async (context, next) =>
+{
+    var isUnsafeApiRequest =
+        context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase)
+        && (HttpMethods.IsPost(context.Request.Method)
+            || HttpMethods.IsPut(context.Request.Method)
+            || HttpMethods.IsPatch(context.Request.Method)
+            || HttpMethods.IsDelete(context.Request.Method));
+
+    if (isUnsafeApiRequest)
+    {
+        var antiforgery = context.RequestServices.GetRequiredService<IAntiforgery>();
+        await antiforgery.ValidateRequestAsync(context);
+    }
+
+    await next();
+});
 
 var api = app.MapGroup("/api");
+
+api.MapGet("/security/csrf", (HttpContext httpContext, IAntiforgery antiforgery) =>
+{
+    var tokens = antiforgery.GetAndStoreTokens(httpContext);
+    return Results.Ok(new { token = tokens.RequestToken });
+});
+
+api.MapGet("/auth/status", async (UserManager<ApplicationUser> userManager, ClaimsPrincipal principal) =>
+{
+    var owners = await userManager.GetUsersInRoleAsync(ApplicationRoles.Owner);
+    return Results.Ok(new
+    {
+        hasOwner = owners.Count > 0,
+        isAuthenticated = principal.Identity?.IsAuthenticated == true,
+        user = principal.Identity?.IsAuthenticated == true ? await BuildUserResponseAsync(userManager, principal) : null
+    });
+});
+
+api.MapGet("/auth/me", async (UserManager<ApplicationUser> userManager, ClaimsPrincipal principal) =>
+{
+    var response = await BuildUserResponseAsync(userManager, principal);
+    return response is null ? Results.Unauthorized() : Results.Ok(response);
+}).RequireAuthorization();
+
+api.MapPost("/auth/register-owner", async (
+    RegisterOwnerRequest request,
+    UserManager<ApplicationUser> userManager,
+    RoleManager<IdentityRole> roleManager,
+    SignInManager<ApplicationUser> signInManager) =>
+{
+    var owners = await userManager.GetUsersInRoleAsync(ApplicationRoles.Owner);
+    if (owners.Count > 0)
+    {
+        return Results.Conflict(new { error = "Owner account already exists." });
+    }
+
+    await EnsureRolesAsync(roleManager);
+
+    var user = new ApplicationUser
+    {
+        UserName = request.Email.Trim(),
+        Email = request.Email.Trim(),
+        DisplayName = request.DisplayName.Trim()
+    };
+
+    var result = await userManager.CreateAsync(user, request.Password);
+    if (!result.Succeeded)
+    {
+        return Results.BadRequest(new { errors = result.Errors.Select(error => error.Description) });
+    }
+
+    await userManager.AddToRoleAsync(user, ApplicationRoles.Owner);
+    await signInManager.SignInAsync(user, isPersistent: true);
+    return Results.Ok(new { email = user.Email, user.DisplayName, roles = new[] { ApplicationRoles.Owner } });
+});
+
+api.MapPost("/auth/login", async (
+    LoginRequest request,
+    UserManager<ApplicationUser> userManager,
+    SignInManager<ApplicationUser> signInManager) =>
+{
+    var user = await userManager.FindByEmailAsync(request.Email.Trim());
+    if (user is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    var result = await signInManager.PasswordSignInAsync(user, request.Password, isPersistent: true, lockoutOnFailure: true);
+    if (!result.Succeeded)
+    {
+        return Results.Unauthorized();
+    }
+
+    var roles = await userManager.GetRolesAsync(user);
+    return Results.Ok(new { email = user.Email, user.DisplayName, roles });
+});
+
+api.MapPost("/auth/logout", async (SignInManager<ApplicationUser> signInManager) =>
+{
+    await signInManager.SignOutAsync();
+    return Results.NoContent();
+}).RequireAuthorization();
+
+api.MapGet("/auth/unauthorized", () => Results.Unauthorized());
+api.MapGet("/auth/forbidden", () => Results.Forbid());
 
 api.MapGet("/albums", async (AlbumReader reader, CancellationToken cancellationToken) =>
 {
     var albums = await reader.ListVisibleAsync(cancellationToken);
     return Results.Ok(albums);
-});
+}).RequireAuthorization();
 
 api.MapGet("/albums/{albumId:guid}", async (Guid albumId, AlbumReader reader, CancellationToken cancellationToken) =>
 {
     var album = await reader.GetAsync(albumId, cancellationToken);
     return album is null ? Results.NotFound() : Results.Ok(album);
 })
-.WithName("GetAlbum");
+.WithName("GetAlbum")
+.RequireAuthorization();
 
 api.MapPost("/albums/{albumId:guid}/photos", async (
     Guid albumId,
@@ -107,8 +261,7 @@ api.MapPost("/albums/{albumId:guid}/photos", async (
     {
         return Results.Problem(exception.Message, statusCode: StatusCodes.Status503ServiceUnavailable);
     }
-})
-.DisableAntiforgery();
+}).RequireAuthorization("CanEditAlbum");
 
 api.MapGet("/photos/{photoId:guid}/content", (Guid photoId) =>
 {
@@ -116,7 +269,7 @@ api.MapGet("/photos/{photoId:guid}/content", (Guid photoId) =>
         title: "Media proxy placeholder",
         detail: "The production version will authorize album access, resolve StorageProvider and StorageKey through IMediaStorage, and stream private media.",
         statusCode: StatusCodes.Status501NotImplemented);
-});
+}).RequireAuthorization();
 
 api.MapGet("/health", () => Results.Ok(new
 {
@@ -126,3 +279,30 @@ api.MapGet("/health", () => Results.Ok(new
 }));
 
 app.Run();
+
+static async Task EnsureRolesAsync(RoleManager<IdentityRole> roleManager)
+{
+    foreach (var role in ApplicationRoles.All)
+    {
+        if (!await roleManager.RoleExistsAsync(role))
+        {
+            await roleManager.CreateAsync(new IdentityRole(role));
+        }
+    }
+}
+
+static async Task<object?> BuildUserResponseAsync(UserManager<ApplicationUser> userManager, ClaimsPrincipal principal)
+{
+    var user = await userManager.GetUserAsync(principal);
+    if (user is null)
+    {
+        return null;
+    }
+
+    var roles = await userManager.GetRolesAsync(user);
+    return new { email = user.Email, user.DisplayName, roles };
+}
+
+internal sealed record RegisterOwnerRequest(string Email, string Password, string DisplayName);
+
+internal sealed record LoginRequest(string Email, string Password);

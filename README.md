@@ -6,7 +6,7 @@
 
 - `src/BabyAlbum.Domain`: album, page, photo and memory domain model.
 - `src/BabyAlbum.Application`: use cases, DTO mapping and repository ports.
-- `src/BabyAlbum.Infrastructure`: current in-memory repository, ready for EF Core and storage adapters.
+- `src/BabyAlbum.Infrastructure`: EF Core Identity/PostgreSQL persistence, current in-memory album repository and storage adapters.
 - `src/BabyAlbum.API`: HTTP API endpoints.
 - `src/BabyAlbum.Contracts`: DTOs shared across API boundaries.
 
@@ -25,9 +25,33 @@ dotnet build BabyAlbum.slnx
 Useful endpoints:
 
 - `GET /api/health`
-- `GET /api/albums`
-- `GET /api/albums/{albumId}`
-- `POST /api/albums/{albumId}/photos` with `multipart/form-data` field `file`
+- `GET /api/security/csrf`
+- `GET /api/auth/status`
+- `POST /api/auth/register-owner`
+- `POST /api/auth/login`
+- `POST /api/auth/logout`
+- `GET /api/albums` authenticated
+- `GET /api/albums/{albumId}` authenticated
+- `POST /api/albums/{albumId}/photos` authenticated Owner/Editor with `multipart/form-data` field `file`
+
+## PostgreSQL and native auth
+
+Authentication is native ASP.NET Core Identity with secure cookies, password hashing managed by Identity, PostgreSQL through EF Core, CSRF validation for unsafe API methods and security headers including CSP.
+
+Use Neon for the free PostgreSQL database. Local setup can read Neon CLI's `.env.local`:
+
+```powershell
+$env:DATABASE_URL = (Get-Content .env.local | Where-Object { $_ -like 'DATABASE_URL=*' } | Select-Object -First 1).Substring('DATABASE_URL='.Length).Trim().Trim('"').Trim("'")
+dotnet ef database update --project src/BabyAlbum.Infrastructure --startup-project src/BabyAlbum.API
+```
+
+Render needs this backend environment variable:
+
+```text
+DATABASE_URL=<Neon pooled connection string>
+```
+
+The first browser session creates the owner account through `POST /api/auth/register-owner`. After one Owner exists, that endpoint returns `409 Conflict`.
 
 ## Google Drive storage
 
@@ -65,13 +89,14 @@ Suggested Render backend settings:
   - `GOOGLE_DRIVE_FOLDER_ID=10Vsq5UkIMBeGZVO4HzjdGQJi91mznuku`
   - `GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON=<full service account JSON>`
   - `CORS_ALLOWED_ORIGINS=https://your-frontend.onrender.com`
+  - `DATABASE_URL=<Neon pooled connection string>`
 
 After creating the Google service account, copy its `client_email` and share the Drive folder with that email as Editor. Without that share, Google Drive will reject uploads even if the folder ID is correct.
 
 ## Next backend steps
 
-1. Add identity, roles and invitation token persistence.
-2. Replace the in-memory repository with EF Core and a relational database.
-3. Persist uploaded photo metadata after Drive upload.
+1. Replace the in-memory album repository with EF Core tables.
+2. Persist uploaded photo metadata after Drive upload.
+3. Add invitation token persistence for Viewer/Editor users.
 4. Add derivative generation and EXIF stripping.
 5. Add authorization, architecture and integration tests.
