@@ -10,3 +10,5 @@ publish.log
 *.nupkg
 appsettings.Local.json
 appsettings.*.local.json
+.env.local
+node_modules/
