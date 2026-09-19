@@ -92,6 +92,86 @@ public sealed class DbAlbumRepository : IAlbumRepository
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<AlbumPage> AddPageAsync(Guid albumId, LayoutType layout, CancellationToken cancellationToken)
+    {
+        await EnsureSeededAsync(cancellationToken);
+
+        var albumExists = await _dbContext.Albums
+            .AnyAsync(album => album.Id == albumId, cancellationToken);
+
+        if (!albumExists)
+        {
+            throw new InvalidOperationException("Album was not found.");
+        }
+
+        var nextPageNumber = await _dbContext.AlbumPages
+            .Where(page => page.AlbumId == albumId)
+            .Select(page => (int?)page.PageNumber)
+            .MaxAsync(cancellationToken) ?? 0;
+
+        var pageRecord = new AlbumPageRecord
+        {
+            Id = Guid.NewGuid(),
+            AlbumId = albumId,
+            PageNumber = nextPageNumber + 1,
+            Layout = layout,
+            Title = $"Page {nextPageNumber + 1}",
+            DateLabel = "Family archive",
+            Text = "Add photos and a caption for this album page."
+        };
+
+        _dbContext.AlbumPages.Add(pageRecord);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return pageRecord.ToDomain();
+    }
+
+    public async Task DeletePageAsync(Guid albumId, Guid pageId, CancellationToken cancellationToken)
+    {
+        var pages = await _dbContext.AlbumPages
+            .Include(page => page.Photos)
+            .Where(page => page.AlbumId == albumId)
+            .OrderBy(page => page.PageNumber)
+            .ToListAsync(cancellationToken);
+
+        var page = pages.FirstOrDefault(item => item.Id == pageId);
+        if (page is null)
+        {
+            throw new InvalidOperationException("Album page was not found.");
+        }
+
+        if (pages.Count <= 1)
+        {
+            throw new InvalidOperationException("The album must keep at least one page.");
+        }
+
+        if (page.Photos.Count > 0)
+        {
+            throw new InvalidOperationException("Move or remove this page's photos before deleting it.");
+        }
+
+        var pagesToRenumber = pages
+            .Where(item => item.Id != pageId && item.PageNumber > page.PageNumber)
+            .OrderBy(item => item.PageNumber)
+            .ToList();
+
+        foreach (var item in pagesToRenumber)
+        {
+            item.PageNumber += 1000;
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        _dbContext.AlbumPages.Remove(page);
+
+        foreach (var item in pagesToRenumber)
+        {
+            item.PageNumber -= 1001;
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task AddPhotoAsync(Guid albumId, Guid pageId, Photo photo, string contentType, CancellationToken cancellationToken)
     {
         var page = await _dbContext.AlbumPages

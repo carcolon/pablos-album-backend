@@ -16,6 +16,10 @@ public interface IAlbumRepository
 
     Task UpdatePageLayoutAsync(Guid albumId, Guid pageId, LayoutType layout, CancellationToken cancellationToken);
 
+    Task<AlbumPage> AddPageAsync(Guid albumId, LayoutType layout, CancellationToken cancellationToken);
+
+    Task DeletePageAsync(Guid albumId, Guid pageId, CancellationToken cancellationToken);
+
     Task AddPhotoAsync(Guid albumId, Guid pageId, Photo photo, string contentType, CancellationToken cancellationToken);
 
     Task AssignPhotoToPageAsync(Guid albumId, Guid pageId, Guid photoId, int sortOrder, CancellationToken cancellationToken);

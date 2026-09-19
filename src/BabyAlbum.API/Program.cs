@@ -309,6 +309,60 @@ api.MapPut("/albums/{albumId:guid}/pages/{pageId:guid}/layout", async (
     }
 }).RequireAuthorization("CanEditAlbum");
 
+api.MapPost("/albums/{albumId:guid}/pages", async (
+    Guid albumId,
+    AddPageRequest request,
+    IAlbumRepository albums,
+    CancellationToken cancellationToken) =>
+{
+    var requestedLayout = string.IsNullOrWhiteSpace(request.Layout) ? LayoutType.FullPhoto.ToString() : request.Layout;
+    if (!Enum.TryParse<LayoutType>(requestedLayout, ignoreCase: true, out var layout))
+    {
+        return Results.BadRequest(new { error = "Unsupported page layout." });
+    }
+
+    try
+    {
+        var page = await albums.AddPageAsync(albumId, layout, cancellationToken);
+        return Results.Created($"/api/albums/{albumId}/pages/{page.Id}", new AlbumPageDto(
+            page.Id,
+            page.PageNumber,
+            page.Layout.ToString(),
+            page.Title,
+            page.DateLabel,
+            page.Text,
+            page.Photos.Select(photo => new PhotoDto(
+                photo.Id,
+                photo.Url,
+                photo.Alt,
+                photo.Caption,
+                photo.StorageProvider,
+                photo.StorageKey,
+                photo.SortOrder)).ToArray()));
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).RequireAuthorization("CanEditAlbum");
+
+api.MapDelete("/albums/{albumId:guid}/pages/{pageId:guid}", async (
+    Guid albumId,
+    Guid pageId,
+    IAlbumRepository albums,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        await albums.DeletePageAsync(albumId, pageId, cancellationToken);
+        return Results.NoContent();
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).RequireAuthorization("CanEditAlbum");
+
 api.MapGet("/albums/{albumId:guid}/photos", async (
     Guid albumId,
     IAlbumRepository albums,
@@ -509,6 +563,8 @@ internal sealed record RegisterOwnerRequest(string Email, string Password, strin
 internal sealed record LoginRequest(string Email, string Password, string? DisplayName);
 
 internal sealed record UpdatePageLayoutRequest(string Layout);
+
+internal sealed record AddPageRequest(string? Layout);
 
 internal sealed record AssignPhotoRequest(int SortOrder);
 
