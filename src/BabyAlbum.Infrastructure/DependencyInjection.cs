@@ -35,7 +35,7 @@ public static class DependencyInjection
             .AddEntityFrameworkStores<AppDbContext>()
             .AddDefaultTokenProviders();
 
-        services.AddSingleton<IAlbumRepository, InMemoryAlbumRepository>();
+        services.AddScoped<IAlbumRepository, DbAlbumRepository>();
         services.AddSingleton<IImageProcessor, ImageSharpImageProcessor>();
         services.AddScoped<IMediaStorage, GoogleDriveMediaStorage>();
         return services;

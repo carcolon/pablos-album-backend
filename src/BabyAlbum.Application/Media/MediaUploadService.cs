@@ -1,4 +1,5 @@
 using BabyAlbum.Application.Albums;
+using BabyAlbum.Domain.Albums;
 
 namespace BabyAlbum.Application.Media;
 
@@ -23,6 +24,7 @@ public sealed class MediaUploadService
 
     public async Task<UploadPhotoResult> UploadPhotoAsync(
         Guid albumId,
+        Guid pageId,
         IncomingImage image,
         CancellationToken cancellationToken)
     {
@@ -51,8 +53,22 @@ public sealed class MediaUploadService
             new MediaUpload(processed.FileName, processed.ContentType, processed.Content),
             cancellationToken);
 
+        var photoId = Guid.NewGuid();
+        var photo = new Photo(
+            photoId,
+            $"/api/photos/{photoId}/content",
+            Path.GetFileNameWithoutExtension(image.FileName),
+            string.Empty,
+            stored.StorageProvider,
+            stored.StorageKey,
+            0);
+
+        await _albums.AddPhotoAsync(albumId, pageId, photo, stored.MimeType, cancellationToken);
+
         return new UploadPhotoResult(
             albumId,
+            pageId,
+            photoId,
             image.FileName,
             processed.FileName,
             processed.ContentType,

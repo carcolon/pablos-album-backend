@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using BabyAlbum.Application.Albums;
 using BabyAlbum.Application.Media;
+using BabyAlbum.Domain.Albums;
 using BabyAlbum.Infrastructure;
 using BabyAlbum.Infrastructure.Identity;
 using BabyAlbum.Infrastructure.Storage.GoogleDrive;
@@ -268,8 +269,32 @@ api.MapGet("/albums/{albumId:guid}", async (Guid albumId, AlbumReader reader, Ca
 })
 .WithName("GetAlbum");
 
-api.MapPost("/albums/{albumId:guid}/photos", async (
+api.MapPut("/albums/{albumId:guid}/pages/{pageId:guid}/layout", async (
     Guid albumId,
+    Guid pageId,
+    UpdatePageLayoutRequest request,
+    IAlbumRepository albums,
+    CancellationToken cancellationToken) =>
+{
+    if (!Enum.TryParse<LayoutType>(request.Layout, ignoreCase: true, out var layout))
+    {
+        return Results.BadRequest(new { error = "Unsupported page layout." });
+    }
+
+    try
+    {
+        await albums.UpdatePageLayoutAsync(albumId, pageId, layout, cancellationToken);
+        return Results.NoContent();
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.NotFound(new { error = exception.Message });
+    }
+}).RequireAuthorization("CanEditAlbum");
+
+api.MapPost("/albums/{albumId:guid}/pages/{pageId:guid}/photos", async (
+    Guid albumId,
+    Guid pageId,
     HttpRequest request,
     MediaUploadService mediaUploadService,
     CancellationToken cancellationToken) =>
@@ -291,10 +316,11 @@ api.MapPost("/albums/{albumId:guid}/photos", async (
     {
         var result = await mediaUploadService.UploadPhotoAsync(
             albumId,
+            pageId,
             new IncomingImage(file.FileName, file.ContentType, stream, file.Length),
             cancellationToken);
 
-        return Results.Created($"/api/photos/{result.StorageKey}/content", result);
+        return Results.Created($"/api/photos/{result.PhotoId}/content", result);
     }
     catch (AlbumNotFoundException exception)
     {
@@ -310,12 +336,21 @@ api.MapPost("/albums/{albumId:guid}/photos", async (
     }
 }).RequireAuthorization("CanEditAlbum");
 
-api.MapGet("/photos/{photoId:guid}/content", (Guid photoId) =>
+api.MapGet("/photos/{photoId:guid}/content", async (
+    Guid photoId,
+    IAlbumRepository albums,
+    IMediaStorage mediaStorage,
+    CancellationToken cancellationToken) =>
 {
-    return Results.Problem(
-        title: "Media proxy placeholder",
-        detail: "The production version will authorize album access, resolve StorageProvider and StorageKey through IMediaStorage, and stream private media.",
-        statusCode: StatusCodes.Status501NotImplemented);
+    var photo = await albums.GetPhotoAsync(photoId, cancellationToken);
+    if (photo is null)
+    {
+        return Results.NotFound();
+    }
+
+    var contentType = await albums.GetPhotoContentTypeAsync(photoId, cancellationToken) ?? "application/octet-stream";
+    var stream = await mediaStorage.OpenReadAsync(photo.StorageKey, cancellationToken);
+    return Results.File(stream, contentType);
 });
 
 api.MapGet("/health", () => Results.Ok(new
@@ -401,3 +436,5 @@ static IEnumerable<string> EnumerateCurrentAndParents(string startPath)
 internal sealed record RegisterOwnerRequest(string Email, string Password, string DisplayName);
 
 internal sealed record LoginRequest(string Email, string Password, string? DisplayName);
+
+internal sealed record UpdatePageLayoutRequest(string Layout);

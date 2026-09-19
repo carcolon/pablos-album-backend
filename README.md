@@ -6,7 +6,7 @@
 
 - `src/BabyAlbum.Domain`: album, page, photo and memory domain model.
 - `src/BabyAlbum.Application`: use cases, DTO mapping and repository ports.
-- `src/BabyAlbum.Infrastructure`: EF Core Identity/PostgreSQL persistence, current in-memory album repository and storage adapters.
+- `src/BabyAlbum.Infrastructure`: EF Core Identity/PostgreSQL persistence, album/page/photo tables and storage adapters.
 - `src/BabyAlbum.API`: HTTP API endpoints.
 - `src/BabyAlbum.Contracts`: DTOs shared across API boundaries.
 
@@ -32,7 +32,9 @@ Useful endpoints:
 - `POST /api/auth/logout`
 - `GET /api/albums` public album viewer
 - `GET /api/albums/{albumId}` public album viewer
-- `POST /api/albums/{albumId}/photos` authenticated Owner/Editor with `multipart/form-data` field `file`
+- `PUT /api/albums/{albumId}/pages/{pageId}/layout` authenticated Owner/Editor
+- `POST /api/albums/{albumId}/pages/{pageId}/photos` authenticated Owner/Editor with `multipart/form-data` field `file`
+- `GET /api/photos/{photoId}/content` streams stored media
 
 ## PostgreSQL and native auth
 
@@ -102,7 +104,7 @@ Suggested Render backend settings:
 ## Next backend steps
 
 1. Replace the in-memory album repository with EF Core tables.
-2. Persist uploaded photo metadata after Drive upload.
-3. Add invitation token persistence for Viewer/Editor users.
-4. Add derivative generation and EXIF stripping.
-5. Add authorization, architecture and integration tests.
+1. Add invitation token persistence for Viewer/Editor users.
+2. Add title/caption/date editing endpoints.
+3. Add derivative generation and EXIF stripping.
+4. Add authorization, architecture and integration tests.

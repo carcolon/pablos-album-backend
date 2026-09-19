@@ -2,6 +2,8 @@ namespace BabyAlbum.Application.Media;
 
 public sealed record UploadPhotoResult(
     Guid AlbumId,
+    Guid PageId,
+    Guid PhotoId,
     string OriginalFileName,
     string StoredFileName,
     string ContentType,
