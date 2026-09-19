@@ -55,17 +55,23 @@ If there is no Owner yet, the first successful Studio login creates that user as
 
 ## Google Drive storage
 
-Create a Google Cloud service account with Drive API enabled. Share the target Google Drive folder with the service account email, then configure these environment variables in Render:
+For a personal Google Drive folder, use OAuth credentials for the Google account that owns the folder. Service accounts cannot upload into a normal personal "My Drive" folder because they do not have storage quota; they are only suitable for Shared Drives or Workspace setups.
+
+Configure these variables in Render:
 
 ```text
 GOOGLE_DRIVE_FOLDER_ID=10Vsq5UkIMBeGZVO4HzjdGQJi91mznuku
-GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON=<full service account JSON>
+GOOGLE_DRIVE_OAUTH_CLIENT_ID=<Google OAuth desktop/web client id>
+GOOGLE_DRIVE_OAUTH_CLIENT_SECRET=<Google OAuth client secret>
+GOOGLE_DRIVE_OAUTH_REFRESH_TOKEN=<Google OAuth refresh token>
+GOOGLE_DRIVE_OAUTH_USER=cfca5@hotmail.com
 CORS_ALLOWED_ORIGINS=<your frontend Render URL>
 ```
 
-Local development can also use:
+For Shared Drive or Workspace setups, service-account credentials are still supported:
 
 ```text
+GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON=<full service account JSON>
 GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_PATH=C:\path\to\service-account.json
 ```
 
@@ -87,11 +93,11 @@ Suggested Render backend settings:
 - Health check path: `/api/health`
 - Environment variables:
   - `GOOGLE_DRIVE_FOLDER_ID=10Vsq5UkIMBeGZVO4HzjdGQJi91mznuku`
-  - `GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON=<full service account JSON>`
+  - `GOOGLE_DRIVE_OAUTH_CLIENT_ID=<Google OAuth client id>`
+  - `GOOGLE_DRIVE_OAUTH_CLIENT_SECRET=<Google OAuth client secret>`
+  - `GOOGLE_DRIVE_OAUTH_REFRESH_TOKEN=<Google OAuth refresh token>`
   - `CORS_ALLOWED_ORIGINS=https://your-frontend.onrender.com`
   - `DATABASE_URL=<Neon pooled connection string>`
-
-After creating the Google service account, copy its `client_email` and share the Drive folder with that email as Editor. Without that share, Google Drive will reject uploads even if the folder ID is correct.
 
 ## Next backend steps
 

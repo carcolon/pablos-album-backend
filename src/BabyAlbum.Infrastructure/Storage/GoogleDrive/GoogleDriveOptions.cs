@@ -11,4 +11,12 @@ public sealed class GoogleDriveOptions
     public string? ServiceAccountJson { get; set; }
 
     public string? ServiceAccountJsonPath { get; set; }
+
+    public string? OAuthClientId { get; set; }
+
+    public string? OAuthClientSecret { get; set; }
+
+    public string? OAuthRefreshToken { get; set; }
+
+    public string OAuthUser { get; set; } = "me";
 }

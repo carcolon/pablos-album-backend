@@ -76,6 +76,10 @@ builder.Services.PostConfigure<GoogleDriveOptions>(options =>
     options.FolderId ??= Environment.GetEnvironmentVariable("GOOGLE_DRIVE_FOLDER_ID");
     options.ServiceAccountJson ??= Environment.GetEnvironmentVariable("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON");
     options.ServiceAccountJsonPath ??= Environment.GetEnvironmentVariable("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON_PATH");
+    options.OAuthClientId ??= Environment.GetEnvironmentVariable("GOOGLE_DRIVE_OAUTH_CLIENT_ID");
+    options.OAuthClientSecret ??= Environment.GetEnvironmentVariable("GOOGLE_DRIVE_OAUTH_CLIENT_SECRET");
+    options.OAuthRefreshToken ??= Environment.GetEnvironmentVariable("GOOGLE_DRIVE_OAUTH_REFRESH_TOKEN");
+    options.OAuthUser = Environment.GetEnvironmentVariable("GOOGLE_DRIVE_OAUTH_USER") ?? options.OAuthUser;
 });
 builder.Services.AddScoped<AlbumReader>();
 builder.Services.AddScoped<MediaUploadService>();

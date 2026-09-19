@@ -1,6 +1,9 @@
 using BabyAlbum.Application.Media;
 using Google.Apis.Auth.OAuth2;
+using Google.Apis.Auth.OAuth2.Flows;
+using Google.Apis.Auth.OAuth2.Responses;
 using Google.Apis.Drive.v3;
+using Google.Apis.Http;
 using Google.Apis.Services;
 using Microsoft.Extensions.Options;
 
@@ -65,27 +68,53 @@ public sealed class GoogleDriveMediaStorage : IMediaStorage
 
     private DriveService CreateDriveService()
     {
-        GoogleCredential credential;
+        IConfigurableHttpClientInitializer credential;
 
-        if (!string.IsNullOrWhiteSpace(_options.ServiceAccountJson))
+        if (HasOAuthCredentials())
+        {
+            var flow = new GoogleAuthorizationCodeFlow(new GoogleAuthorizationCodeFlow.Initializer
+            {
+                ClientSecrets = new ClientSecrets
+                {
+                    ClientId = _options.OAuthClientId,
+                    ClientSecret = _options.OAuthClientSecret
+                },
+                Scopes = Scopes
+            });
+
+            credential = new UserCredential(
+                flow,
+                _options.OAuthUser,
+                new TokenResponse { RefreshToken = _options.OAuthRefreshToken });
+        }
+        else if (!string.IsNullOrWhiteSpace(_options.ServiceAccountJson))
         {
             credential = CredentialFactory
-                .FromJson(_options.ServiceAccountJson, JsonCredentialParameters.ServiceAccountCredentialType);
+                .FromJson(_options.ServiceAccountJson, JsonCredentialParameters.ServiceAccountCredentialType)
+                .CreateScoped(Scopes);
         }
         else if (!string.IsNullOrWhiteSpace(_options.ServiceAccountJsonPath))
         {
             credential = CredentialFactory
-                .FromFile(_options.ServiceAccountJsonPath, JsonCredentialParameters.ServiceAccountCredentialType);
+                .FromFile(_options.ServiceAccountJsonPath, JsonCredentialParameters.ServiceAccountCredentialType)
+                .CreateScoped(Scopes);
         }
         else
         {
-            throw new InvalidOperationException("Google Drive credentials are not configured. Set GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON in Render.");
+            throw new InvalidOperationException("Google Drive credentials are not configured. Set OAuth refresh-token credentials for a personal Drive, or service-account credentials for a Shared Drive.");
         }
 
         return new DriveService(new BaseClientService.Initializer
         {
             ApplicationName = _options.ApplicationName,
-            HttpClientInitializer = credential.CreateScoped(Scopes)
+            HttpClientInitializer = credential
         });
+    }
+
+    private bool HasOAuthCredentials()
+    {
+        return !string.IsNullOrWhiteSpace(_options.OAuthClientId)
+            && !string.IsNullOrWhiteSpace(_options.OAuthClientSecret)
+            && !string.IsNullOrWhiteSpace(_options.OAuthRefreshToken);
     }
 }
