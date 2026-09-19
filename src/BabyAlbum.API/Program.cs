@@ -148,7 +148,16 @@ app.Use(async (context, next) =>
     if (isUnsafeApiRequest)
     {
         var antiforgery = context.RequestServices.GetRequiredService<IAntiforgery>();
-        await antiforgery.ValidateRequestAsync(context);
+        try
+        {
+            await antiforgery.ValidateRequestAsync(context);
+        }
+        catch (AntiforgeryValidationException exception)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsJsonAsync(new { error = "Security token validation failed.", detail = exception.Message });
+            return;
+        }
     }
 
     await next();
@@ -423,23 +432,24 @@ api.MapPost("/albums/{albumId:guid}/pages/{pageId:guid}/photos", async (
     Guid pageId,
     HttpRequest request,
     MediaUploadService mediaUploadService,
+    IWebHostEnvironment environment,
     CancellationToken cancellationToken) =>
 {
-    if (!request.HasFormContentType)
-    {
-        return Results.BadRequest(new { error = "Use multipart/form-data with a file field named 'file'." });
-    }
-
-    var form = await request.ReadFormAsync(cancellationToken);
-    var file = form.Files["file"];
-    if (file is null)
-    {
-        return Results.BadRequest(new { error = "Missing file field." });
-    }
-
-    await using var stream = file.OpenReadStream();
     try
     {
+        if (!request.HasFormContentType)
+        {
+            return Results.BadRequest(new { error = "Use multipart/form-data with a file field named 'file'." });
+        }
+
+        var form = await request.ReadFormAsync(cancellationToken);
+        var file = form.Files["file"];
+        if (file is null)
+        {
+            return Results.BadRequest(new { error = "Missing file field." });
+        }
+
+        await using var stream = file.OpenReadStream();
         var result = await mediaUploadService.UploadPhotoAsync(
             albumId,
             pageId,
@@ -459,6 +469,13 @@ api.MapPost("/albums/{albumId:guid}/pages/{pageId:guid}/photos", async (
     catch (InvalidOperationException exception)
     {
         return Results.BadRequest(new { error = exception.Message });
+    }
+    catch (Exception exception)
+    {
+        return Results.Problem(
+            detail: environment.IsDevelopment() ? exception.ToString() : exception.Message,
+            statusCode: StatusCodes.Status500InternalServerError,
+            title: "Photo upload failed.");
     }
 }).RequireAuthorization("CanEditAlbum");
 
