@@ -180,9 +180,52 @@ api.MapPost("/auth/register-owner", async (
 api.MapPost("/auth/login", async (
     LoginRequest request,
     UserManager<ApplicationUser> userManager,
+    RoleManager<IdentityRole> roleManager,
     SignInManager<ApplicationUser> signInManager) =>
 {
-    var user = await userManager.FindByEmailAsync(request.Email.Trim());
+    var email = request.Email.Trim();
+    var owners = await userManager.GetUsersInRoleAsync(ApplicationRoles.Owner);
+    var user = await userManager.FindByEmailAsync(email);
+
+    if (owners.Count == 0)
+    {
+        await EnsureRolesAsync(roleManager);
+
+        if (user is null)
+        {
+            user = new ApplicationUser
+            {
+                UserName = email,
+                Email = email,
+                DisplayName = string.IsNullOrWhiteSpace(request.DisplayName)
+                    ? email.Split('@')[0]
+                    : request.DisplayName.Trim()
+            };
+
+            var createResult = await userManager.CreateAsync(user, request.Password);
+            if (!createResult.Succeeded)
+            {
+                return Results.BadRequest(new { errors = createResult.Errors.Select(error => error.Description) });
+            }
+        }
+        else
+        {
+            var passwordResult = await signInManager.CheckPasswordSignInAsync(user, request.Password, lockoutOnFailure: true);
+            if (!passwordResult.Succeeded)
+            {
+                return Results.Unauthorized();
+            }
+        }
+
+        if (!await userManager.IsInRoleAsync(user, ApplicationRoles.Owner))
+        {
+            await userManager.AddToRoleAsync(user, ApplicationRoles.Owner);
+        }
+
+        await signInManager.SignInAsync(user, isPersistent: true);
+        return Results.Ok(new { email = user.Email, user.DisplayName, roles = new[] { ApplicationRoles.Owner } });
+    }
+
     if (user is null)
     {
         return Results.Unauthorized();
@@ -211,15 +254,14 @@ api.MapGet("/albums", async (AlbumReader reader, CancellationToken cancellationT
 {
     var albums = await reader.ListVisibleAsync(cancellationToken);
     return Results.Ok(albums);
-}).RequireAuthorization();
+});
 
 api.MapGet("/albums/{albumId:guid}", async (Guid albumId, AlbumReader reader, CancellationToken cancellationToken) =>
 {
     var album = await reader.GetAsync(albumId, cancellationToken);
     return album is null ? Results.NotFound() : Results.Ok(album);
 })
-.WithName("GetAlbum")
-.RequireAuthorization();
+.WithName("GetAlbum");
 
 api.MapPost("/albums/{albumId:guid}/photos", async (
     Guid albumId,
@@ -269,7 +311,7 @@ api.MapGet("/photos/{photoId:guid}/content", (Guid photoId) =>
         title: "Media proxy placeholder",
         detail: "The production version will authorize album access, resolve StorageProvider and StorageKey through IMediaStorage, and stream private media.",
         statusCode: StatusCodes.Status501NotImplemented);
-}).RequireAuthorization();
+});
 
 api.MapGet("/health", () => Results.Ok(new
 {
@@ -305,4 +347,4 @@ static async Task<object?> BuildUserResponseAsync(UserManager<ApplicationUser> u
 
 internal sealed record RegisterOwnerRequest(string Email, string Password, string DisplayName);
 
-internal sealed record LoginRequest(string Email, string Password);
+internal sealed record LoginRequest(string Email, string Password, string? DisplayName);

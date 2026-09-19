@@ -30,13 +30,13 @@ Useful endpoints:
 - `POST /api/auth/register-owner`
 - `POST /api/auth/login`
 - `POST /api/auth/logout`
-- `GET /api/albums` authenticated
-- `GET /api/albums/{albumId}` authenticated
+- `GET /api/albums` public album viewer
+- `GET /api/albums/{albumId}` public album viewer
 - `POST /api/albums/{albumId}/photos` authenticated Owner/Editor with `multipart/form-data` field `file`
 
 ## PostgreSQL and native auth
 
-Authentication is native ASP.NET Core Identity with secure cookies, password hashing managed by Identity, PostgreSQL through EF Core, CSRF validation for unsafe API methods and security headers including CSP.
+Authentication is native ASP.NET Core Identity with secure cookies, password hashing managed by Identity, PostgreSQL through EF Core, CSRF validation for unsafe API methods and security headers including CSP. The album viewer is public; authentication is required for Studio actions such as uploads and future editing.
 
 Use Neon for the free PostgreSQL database. Local setup can read Neon CLI's `.env.local`:
 
@@ -51,7 +51,7 @@ Render needs this backend environment variable:
 DATABASE_URL=<Neon pooled connection string>
 ```
 
-The first browser session creates the owner account through `POST /api/auth/register-owner`. After one Owner exists, that endpoint returns `409 Conflict`.
+If there is no Owner yet, the first successful Studio login creates that user as Owner. After one Owner exists, `POST /api/auth/login` only signs in existing users.
 
 ## Google Drive storage
 
