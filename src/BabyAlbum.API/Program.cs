@@ -1,4 +1,8 @@
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 using BabyAlbum.Application.Albums;
 using BabyAlbum.Application.Media;
 using BabyAlbum.Contracts;
@@ -10,6 +14,7 @@ using BabyAlbum.Infrastructure.Storage.GoogleDrive;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -82,6 +87,7 @@ builder.Services.ConfigureApplicationCookie(options =>
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("CanEditAlbum", policy => policy.RequireRole(ApplicationRoles.Owner, ApplicationRoles.Editor));
+    options.AddPolicy("CanManageUsers", policy => policy.RequireRole(ApplicationRoles.Owner));
 });
 builder.Services.Configure<GoogleDriveOptions>(options =>
 {
@@ -99,6 +105,7 @@ builder.Services.PostConfigure<GoogleDriveOptions>(options =>
 });
 builder.Services.AddScoped<AlbumReader>();
 builder.Services.AddScoped<MediaUploadService>();
+builder.Services.AddHttpClient<EmailSender>();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
@@ -289,6 +296,145 @@ api.MapPost("/auth/logout", async (SignInManager<ApplicationUser> signInManager)
     await signInManager.SignOutAsync();
     return Results.NoContent();
 }).RequireAuthorization();
+
+api.MapPost("/auth/change-password", async (
+    ChangePasswordRequest request,
+    UserManager<ApplicationUser> userManager,
+    SignInManager<ApplicationUser> signInManager,
+    ClaimsPrincipal principal) =>
+{
+    var user = await userManager.GetUserAsync(principal);
+    if (user is null)
+    {
+        return Results.Unauthorized();
+    }
+
+    var result = await userManager.ChangePasswordAsync(user, request.CurrentPassword, request.NewPassword);
+    if (!result.Succeeded)
+    {
+        return Results.BadRequest(new { errors = result.Errors.Select(error => error.Description) });
+    }
+
+    user.MustChangePassword = false;
+    await userManager.UpdateAsync(user);
+    await signInManager.RefreshSignInAsync(user);
+    return Results.Ok(await BuildUserResponseAsync(userManager, principal));
+}).RequireAuthorization();
+
+api.MapPost("/auth/forgot-password", async (
+    ForgotPasswordRequest request,
+    UserManager<ApplicationUser> userManager,
+    EmailSender emailSender) =>
+{
+    var user = await userManager.FindByEmailAsync(request.Email.Trim());
+    if (user is not null)
+    {
+        var token = await userManager.GeneratePasswordResetTokenAsync(user);
+        await emailSender.SendPasswordResetAsync(user.Email!, user.DisplayName, token);
+    }
+
+    return Results.Ok(new { message = "If the email exists, a reset link has been sent." });
+});
+
+api.MapPost("/auth/reset-password", async (
+    ResetPasswordRequest request,
+    UserManager<ApplicationUser> userManager) =>
+{
+    var user = await userManager.FindByEmailAsync(request.Email.Trim());
+    if (user is null)
+    {
+        return Results.BadRequest(new { error = "Invalid password reset request." });
+    }
+
+    string token;
+    try
+    {
+        token = Encoding.UTF8.GetString(WebEncoders.Base64UrlDecode(request.Token));
+    }
+    catch (FormatException)
+    {
+        token = request.Token;
+    }
+
+    var result = await userManager.ResetPasswordAsync(user, token, request.NewPassword);
+    if (!result.Succeeded)
+    {
+        return Results.BadRequest(new { errors = result.Errors.Select(error => error.Description) });
+    }
+
+    user.MustChangePassword = false;
+    user.EmailConfirmed = true;
+    await userManager.UpdateAsync(user);
+    return Results.Ok(new { message = "Password reset completed." });
+});
+
+api.MapPost("/auth/invitations", async (
+    InviteUserRequest request,
+    UserManager<ApplicationUser> userManager,
+    RoleManager<IdentityRole> roleManager,
+    EmailSender emailSender,
+    ClaimsPrincipal principal) =>
+{
+    await EnsureRolesAsync(roleManager);
+
+    var role = string.Equals(request.Role, ApplicationRoles.Editor, StringComparison.OrdinalIgnoreCase)
+        ? ApplicationRoles.Editor
+        : ApplicationRoles.Viewer;
+    var email = request.Email.Trim();
+    var user = await userManager.FindByEmailAsync(email);
+    var temporaryPassword = GenerateTemporaryPassword();
+
+    if (user is null)
+    {
+        user = new ApplicationUser
+        {
+            UserName = email,
+            Email = email,
+            EmailConfirmed = true,
+            DisplayName = string.IsNullOrWhiteSpace(request.DisplayName)
+                ? email.Split('@')[0]
+                : request.DisplayName.Trim(),
+            MustChangePassword = true
+        };
+
+        var createResult = await userManager.CreateAsync(user, temporaryPassword);
+        if (!createResult.Succeeded)
+        {
+            return Results.BadRequest(new { errors = createResult.Errors.Select(error => error.Description) });
+        }
+    }
+    else
+    {
+        var resetToken = await userManager.GeneratePasswordResetTokenAsync(user);
+        var resetResult = await userManager.ResetPasswordAsync(user, resetToken, temporaryPassword);
+        if (!resetResult.Succeeded)
+        {
+            return Results.BadRequest(new { errors = resetResult.Errors.Select(error => error.Description) });
+        }
+
+        user.MustChangePassword = true;
+        user.EmailConfirmed = true;
+        if (!string.IsNullOrWhiteSpace(request.DisplayName))
+        {
+            user.DisplayName = request.DisplayName.Trim();
+        }
+
+        await userManager.UpdateAsync(user);
+    }
+
+    if (!await userManager.IsInRoleAsync(user, role))
+    {
+        await userManager.AddToRoleAsync(user, role);
+    }
+
+    if (role == ApplicationRoles.Editor && await userManager.IsInRoleAsync(user, ApplicationRoles.Viewer))
+    {
+        await userManager.RemoveFromRoleAsync(user, ApplicationRoles.Viewer);
+    }
+
+    await emailSender.SendInvitationAsync(user.Email!, user.DisplayName, role, temporaryPassword, principal.Identity?.Name);
+    return Results.Ok(new { email = user.Email, user.DisplayName, role });
+}).RequireAuthorization("CanManageUsers");
 
 api.MapGet("/auth/unauthorized", () => Results.Unauthorized());
 api.MapGet("/auth/forbidden", () => Results.Forbid());
@@ -542,7 +688,26 @@ static async Task<object?> BuildUserResponseAsync(UserManager<ApplicationUser> u
     }
 
     var roles = await userManager.GetRolesAsync(user);
-    return new { email = user.Email, user.DisplayName, roles };
+    return new { email = user.Email, user.DisplayName, roles, mustChangePassword = user.MustChangePassword };
+}
+
+static string GenerateTemporaryPassword()
+{
+    const string lower = "abcdefghijkmnopqrstuvwxyz";
+    const string upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+    const string digits = "23456789";
+    const string all = lower + upper + digits;
+    Span<char> password = stackalloc char[14];
+    password[0] = upper[RandomNumberGenerator.GetInt32(upper.Length)];
+    password[1] = lower[RandomNumberGenerator.GetInt32(lower.Length)];
+    password[2] = digits[RandomNumberGenerator.GetInt32(digits.Length)];
+    for (var index = 3; index < password.Length; index++)
+    {
+        password[index] = all[RandomNumberGenerator.GetInt32(all.Length)];
+    }
+
+    RandomNumberGenerator.Shuffle(password);
+    return new string(password);
 }
 
 static void LoadDotEnvLocal(string contentRootPath)
@@ -602,6 +767,14 @@ internal sealed record RegisterOwnerRequest(string Email, string Password, strin
 
 internal sealed record LoginRequest(string Email, string Password, string? DisplayName);
 
+internal sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
+
+internal sealed record ForgotPasswordRequest(string Email);
+
+internal sealed record ResetPasswordRequest(string Email, string Token, string NewPassword);
+
+internal sealed record InviteUserRequest(string Email, string Role, string? DisplayName);
+
 internal sealed record UpdatePageLayoutRequest(string Layout);
 
 internal sealed record AddPageRequest(string? Layout);
@@ -609,3 +782,101 @@ internal sealed record AddPageRequest(string? Layout);
 internal sealed record AssignPhotoRequest(int SortOrder);
 
 internal sealed record UpdatePhotoRequest(string? Alt, string? Caption);
+
+internal sealed class EmailSender(HttpClient httpClient, IConfiguration configuration)
+{
+    private const string ResendEndpoint = "https://api.resend.com/emails";
+
+    public Task SendInvitationAsync(string to, string displayName, string role, string temporaryPassword, string? invitedBy)
+    {
+        var loginUrl = BuildPublicUrl("/?studio=1");
+        var safeName = HtmlEncoder.Default.Encode(string.IsNullOrWhiteSpace(displayName) ? to : displayName);
+        var safeInviter = HtmlEncoder.Default.Encode(string.IsNullOrWhiteSpace(invitedBy) ? "Pablo's Album" : invitedBy);
+        var safeRole = HtmlEncoder.Default.Encode(role);
+        var safePassword = HtmlEncoder.Default.Encode(temporaryPassword);
+        var safeLoginUrl = HtmlEncoder.Default.Encode(loginUrl);
+
+        return SendAsync(
+            to,
+            "Invitacion a Pablo's Album Studio",
+            $"""
+            <div style="font-family:Arial,sans-serif;line-height:1.5;color:#2b2520">
+              <h1 style="font-family:Georgia,serif">Pablo's Album Studio</h1>
+              <p>Hola {safeName},</p>
+              <p>{safeInviter} te invito a colaborar como <strong>{safeRole}</strong>.</p>
+              <p>Tu password temporal es:</p>
+              <p style="font-size:20px;font-weight:700;background:#f4ead8;padding:12px;border-radius:6px">{safePassword}</p>
+              <p>Entra al Studio y el sistema te pedira cambiarlo antes de continuar.</p>
+              <p><a href="{safeLoginUrl}" style="background:#2f3f4c;color:#fffaf0;padding:12px 18px;text-decoration:none;border-radius:6px">Abrir Studio</a></p>
+              <p>Si no esperabas esta invitacion, puedes ignorar este correo.</p>
+            </div>
+            """);
+    }
+
+    public Task SendPasswordResetAsync(string to, string displayName, string token)
+    {
+        var encodedToken = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(token));
+        var resetUrl = BuildPublicUrl($"/?reset=1&email={Uri.EscapeDataString(to)}&token={Uri.EscapeDataString(encodedToken)}");
+        var safeName = HtmlEncoder.Default.Encode(string.IsNullOrWhiteSpace(displayName) ? to : displayName);
+        var safeResetUrl = HtmlEncoder.Default.Encode(resetUrl);
+
+        return SendAsync(
+            to,
+            "Reinicia tu password de Pablo's Album",
+            $"""
+            <div style="font-family:Arial,sans-serif;line-height:1.5;color:#2b2520">
+              <h1 style="font-family:Georgia,serif">Reinicio de password</h1>
+              <p>Hola {safeName},</p>
+              <p>Recibimos una solicitud para cambiar tu password de Pablo's Album Studio.</p>
+              <p><a href="{safeResetUrl}" style="background:#2f3f4c;color:#fffaf0;padding:12px 18px;text-decoration:none;border-radius:6px">Cambiar password</a></p>
+              <p>Si no fuiste tu, ignora este correo.</p>
+            </div>
+            """);
+    }
+
+    private async Task SendAsync(string to, string subject, string html)
+    {
+        var provider = configuration["Email:Provider"] ?? Environment.GetEnvironmentVariable("EMAIL_PROVIDER") ?? "Resend";
+        if (!string.Equals(provider, "Resend", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Email provider is not configured for Resend.");
+        }
+
+        var apiKey = configuration["Resend:ApiKey"] ?? Environment.GetEnvironmentVariable("RESEND_API_KEY");
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            throw new InvalidOperationException("RESEND_API_KEY is not configured.");
+        }
+
+        var from = configuration["Email:From"] ?? Environment.GetEnvironmentVariable("EMAIL_FROM") ?? "Pablo's Album <no-reply@pablosalbum.com>";
+        var replyTo = configuration["Email:ReplyTo"] ?? Environment.GetEnvironmentVariable("EMAIL_REPLY_TO");
+        using var request = new HttpRequestMessage(HttpMethod.Post, ResendEndpoint);
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+        var payload = new Dictionary<string, object?>
+        {
+            ["from"] = from,
+            ["to"] = new[] { to },
+            ["subject"] = subject,
+            ["html"] = html
+        };
+        if (!string.IsNullOrWhiteSpace(replyTo))
+        {
+            payload["reply_to"] = replyTo;
+        }
+
+        request.Content = JsonContent.Create(payload, options: new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        using var response = await httpClient.SendAsync(request);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            throw new InvalidOperationException($"Resend email failed with {(int)response.StatusCode}: {body}");
+        }
+    }
+
+    private string BuildPublicUrl(string pathAndQuery)
+    {
+        var baseUrl = configuration["App:PublicUrl"] ?? Environment.GetEnvironmentVariable("APP_PUBLIC_URL") ?? "https://pablosalbum.com";
+        return $"{baseUrl.TrimEnd('/')}{pathAndQuery}";
+    }
+}
