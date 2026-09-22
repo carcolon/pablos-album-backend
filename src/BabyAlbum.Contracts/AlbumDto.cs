@@ -30,8 +30,8 @@ public sealed record PhotoDto(
 
 public sealed record PhotoLibraryItemDto(
     Guid Id,
-    Guid PageId,
-    int PageNumber,
+    Guid? PageId,
+    int? PageNumber,
     string Url,
     string Alt,
     string Caption,

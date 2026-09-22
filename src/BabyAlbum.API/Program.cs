@@ -573,6 +573,23 @@ api.MapPut("/albums/{albumId:guid}/pages/{pageId:guid}/photos/{photoId:guid}", a
     }
 }).RequireAuthorization("CanEditAlbum");
 
+api.MapDelete("/albums/{albumId:guid}/photos/{photoId:guid}/assignment", async (
+    Guid albumId,
+    Guid photoId,
+    IAlbumRepository albums,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        await albums.UnassignPhotoAsync(albumId, photoId, cancellationToken);
+        return Results.NoContent();
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
+}).RequireAuthorization("CanEditAlbum");
+
 api.MapPost("/albums/{albumId:guid}/pages/{pageId:guid}/photos", async (
     Guid albumId,
     Guid pageId,

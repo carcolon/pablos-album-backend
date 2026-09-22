@@ -6,7 +6,9 @@ public sealed class PhotoRecord
 {
     public Guid Id { get; set; }
 
-    public Guid AlbumPageId { get; set; }
+    public Guid AlbumId { get; set; }
+
+    public Guid? AlbumPageId { get; set; }
 
     public AlbumPageRecord? AlbumPage { get; set; }
 

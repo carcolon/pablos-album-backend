@@ -24,5 +24,7 @@ public interface IAlbumRepository
 
     Task AssignPhotoToPageAsync(Guid albumId, Guid pageId, Guid photoId, int sortOrder, CancellationToken cancellationToken);
 
+    Task UnassignPhotoAsync(Guid albumId, Guid photoId, CancellationToken cancellationToken);
+
     Task UpdatePhotoAsync(Guid photoId, string alt, string caption, CancellationToken cancellationToken);
 }

@@ -62,13 +62,13 @@ public sealed class DbAlbumRepository : IAlbumRepository
         return await _dbContext.Photos
             .AsNoTracking()
             .Include(photo => photo.AlbumPage)
-            .Where(photo => photo.AlbumPage != null && photo.AlbumPage.AlbumId == albumId)
-            .OrderBy(photo => photo.AlbumPage!.PageNumber)
+            .Where(photo => photo.AlbumId == albumId)
+            .OrderBy(photo => photo.AlbumPage == null ? int.MaxValue : photo.AlbumPage.PageNumber)
             .ThenBy(photo => photo.SortOrder)
             .Select(photo => new AlbumPhoto(
                 photo.Id,
                 photo.AlbumPageId,
-                photo.AlbumPage!.PageNumber,
+                photo.AlbumPage == null ? null : photo.AlbumPage.PageNumber,
                 photo.Url,
                 photo.Alt,
                 photo.Caption,
@@ -193,6 +193,7 @@ public sealed class DbAlbumRepository : IAlbumRepository
         _dbContext.Photos.Add(new PhotoRecord
         {
             Id = photo.Id,
+            AlbumId = albumId,
             AlbumPageId = pageId,
             Url = photo.Url,
             Alt = photo.Alt,
@@ -221,7 +222,7 @@ public sealed class DbAlbumRepository : IAlbumRepository
             .Include(item => item.AlbumPage)
             .FirstOrDefaultAsync(item => item.Id == photoId, cancellationToken);
 
-        if (photo?.AlbumPage is null || photo.AlbumPage.AlbumId != albumId)
+        if (photo is null || photo.AlbumId != albumId)
         {
             throw new InvalidOperationException("Photo was not found in this album.");
         }
@@ -243,7 +244,7 @@ public sealed class DbAlbumRepository : IAlbumRepository
         targetPhotos.Insert(Math.Min(photo.SortOrder - 1, targetPhotos.Count), photo);
         NormalizePhotoOrder(targetPhotos);
 
-        if (isMovingToDifferentPage)
+        if (isMovingToDifferentPage && sourcePageId.HasValue)
         {
             var sourcePhotos = await _dbContext.Photos
                 .Where(item => item.AlbumPageId == sourcePageId && item.Id != photo.Id)
@@ -251,6 +252,34 @@ public sealed class DbAlbumRepository : IAlbumRepository
                 .ToListAsync(cancellationToken);
             NormalizePhotoOrder(sourcePhotos);
         }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task UnassignPhotoAsync(Guid albumId, Guid photoId, CancellationToken cancellationToken)
+    {
+        var photo = await _dbContext.Photos
+            .FirstOrDefaultAsync(item => item.Id == photoId && item.AlbumId == albumId, cancellationToken);
+
+        if (photo is null)
+        {
+            throw new InvalidOperationException("Photo was not found in this album.");
+        }
+
+        var sourcePageId = photo.AlbumPageId;
+        if (!sourcePageId.HasValue)
+        {
+            return;
+        }
+
+        photo.AlbumPageId = null;
+        photo.SortOrder = 0;
+
+        var sourcePhotos = await _dbContext.Photos
+            .Where(item => item.AlbumPageId == sourcePageId && item.Id != photo.Id)
+            .OrderBy(item => item.SortOrder)
+            .ToListAsync(cancellationToken);
+        NormalizePhotoOrder(sourcePhotos);
 
         await _dbContext.SaveChangesAsync(cancellationToken);
     }

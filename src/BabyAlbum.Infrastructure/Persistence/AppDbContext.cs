@@ -37,6 +37,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
                 .WithOne(page => page.Album)
                 .HasForeignKey(page => page.AlbumId)
                 .OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany<PhotoRecord>()
+                .WithOne()
+                .HasForeignKey(photo => photo.AlbumId)
+                .OnDelete(DeleteBehavior.Cascade);
             entity.HasMany(album => album.Memories)
                 .WithOne(memory => memory.Album)
                 .HasForeignKey(memory => memory.AlbumId)
@@ -54,7 +58,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
             entity.HasMany(page => page.Photos)
                 .WithOne(photo => photo.AlbumPage)
                 .HasForeignKey(photo => photo.AlbumPageId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         builder.Entity<PhotoRecord>(entity =>
@@ -66,6 +70,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : Ident
             entity.Property(photo => photo.ContentType).HasMaxLength(120);
             entity.Property(photo => photo.StorageProvider).HasMaxLength(80);
             entity.Property(photo => photo.StorageKey).HasMaxLength(300);
+            entity.HasIndex(photo => photo.AlbumId);
             entity.HasIndex(photo => new { photo.AlbumPageId, photo.SortOrder });
         });
 
