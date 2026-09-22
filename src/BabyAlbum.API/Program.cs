@@ -452,6 +452,28 @@ api.MapGet("/albums/{albumId:guid}", async (Guid albumId, AlbumReader reader, Ca
 })
 .WithName("GetAlbum");
 
+api.MapPut("/albums/{albumId:guid}/cover", async (
+    Guid albumId,
+    UpdateAlbumCoverRequest request,
+    IAlbumRepository albums,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        await albums.UpdateAlbumCoverTextAsync(
+            albumId,
+            request.Title ?? string.Empty,
+            request.Subtitle ?? string.Empty,
+            request.Description ?? string.Empty,
+            cancellationToken);
+        return Results.NoContent();
+    }
+    catch (InvalidOperationException exception)
+    {
+        return Results.NotFound(new { error = exception.Message });
+    }
+}).RequireAuthorization("CanEditAlbum");
+
 api.MapPut("/albums/{albumId:guid}/pages/{pageId:guid}/layout", async (
     Guid albumId,
     Guid pageId,
@@ -791,6 +813,8 @@ internal sealed record ForgotPasswordRequest(string Email);
 internal sealed record ResetPasswordRequest(string Email, string Token, string NewPassword);
 
 internal sealed record InviteUserRequest(string Email, string Role, string? DisplayName);
+
+internal sealed record UpdateAlbumCoverRequest(string? Title, string? Subtitle, string? Description);
 
 internal sealed record UpdatePageLayoutRequest(string Layout);
 

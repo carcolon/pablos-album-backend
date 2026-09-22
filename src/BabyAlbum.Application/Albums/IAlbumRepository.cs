@@ -14,6 +14,8 @@ public interface IAlbumRepository
 
     Task<IReadOnlyList<AlbumPhoto>> ListPhotosAsync(Guid albumId, CancellationToken cancellationToken);
 
+    Task UpdateAlbumCoverTextAsync(Guid albumId, string title, string subtitle, string description, CancellationToken cancellationToken);
+
     Task UpdatePageLayoutAsync(Guid albumId, Guid pageId, LayoutType layout, CancellationToken cancellationToken);
 
     Task<AlbumPage> AddPageAsync(Guid albumId, LayoutType layout, CancellationToken cancellationToken);

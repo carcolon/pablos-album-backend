@@ -78,6 +78,23 @@ public sealed class DbAlbumRepository : IAlbumRepository
             .ToListAsync(cancellationToken);
     }
 
+    public async Task UpdateAlbumCoverTextAsync(Guid albumId, string title, string subtitle, string description, CancellationToken cancellationToken)
+    {
+        var album = await _dbContext.Albums
+            .FirstOrDefaultAsync(album => album.Id == albumId, cancellationToken);
+
+        if (album is null)
+        {
+            throw new InvalidOperationException("Album was not found.");
+        }
+
+        album.Title = TrimToLength(string.IsNullOrWhiteSpace(title) ? "Pablo's Album" : title, 180);
+        album.Subtitle = TrimToLength(string.IsNullOrWhiteSpace(subtitle) ? "Family archive" : subtitle, 240);
+        album.Description = TrimToLength(description, 800);
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task UpdatePageLayoutAsync(Guid albumId, Guid pageId, LayoutType layout, CancellationToken cancellationToken)
     {
         var page = await _dbContext.AlbumPages
